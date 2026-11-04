@@ -1,0 +1,610 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?
+  discordId     String?   @unique
+  accounts      Account[]
+  sessions      Session[]
+
+  // Permissions & Roles
+  systemRole    String    @default("MEMBER") // "SUPER_ADMIN" | "COMMUNITY_OWNER" | "HIGH_COMMAND" | "SUPERVISOR" | "OFFICER" | "MEMBER"
+  callsign      String?
+  badgeNumber   String?
+
+  // Department affiliation
+  departmentId  String?
+  department    Department? @relation(fields: [departmentId], references: [id])
+
+  ownedCommunities Community[] @relation("CommunityOwner")
+  communityMemberships CommunityMember[]
+  departmentMemberships DepartmentMember[]
+
+  // Subdivisions
+  subdivisionMemberships SubdivisionMember[]
+
+  // Stripe
+  stripeCustomerId     String?   @unique
+  stripeSubscriptionId String?
+  stripePriceId        String?
+  stripeCurrentPeriodEnd DateTime?
+  subscriptionTier     String    @default("free")
+
+  // Activity, LOA & Strikes
+  dutyShifts           DutyShift[]
+  leaveRequests        LeaveOfAbsence[]
+  strikesReceived      InactivityStrike[] @relation("OfficerStrikes")
+  strikesIssued        InactivityStrike[] @relation("CommanderStrikes")
+  trainingRecords      TrainingRecord[]
+  sOPAcknowledgements SOPAcknowledgement[]
+  applicationSubmissions Application[] @relation("ApplicationApplicant")
+  applicationReviews   ApplicationReview[]
+  investigationSubjects InvestigationCase[] @relation("InvestigationSubject")
+  assignedInvestigations InvestigationCase[] @relation("InvestigationInvestigator")
+  investigationEntries InvestigationEntry[]
+  notifications        Notification[]
+  disciplinaryRecordsReceived DisciplinaryRecord[] @relation("DisciplinarySubject")
+  disciplinaryRecordsIssued DisciplinaryRecord[] @relation("DisciplinaryIssuer")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Community {
+  id                    String   @id @default(cuid())
+  name                  String
+  slug                  String   @unique
+  gamePreset            String   @default("CUSTOM")
+  customTerminologyJson String   @default("{}")
+  permissionConfigJson  String   @default("{}")
+  mainDiscordGuildId    String?
+  ownerId               String
+  owner                 User     @relation("CommunityOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  memberships           CommunityMember[]
+  departments           Department[]
+  connectedServers      ConnectedServer[]
+  investigations        InvestigationCase[]
+  trainingCourses       TrainingCourse[]
+  applicationForms      ApplicationForm[]
+  discordOutboxEvents   DiscordOutboxEvent[]
+  auditLogs             AuditLog[]
+  notifications         Notification[]
+  inactivityPolicy      InactivityPolicy?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+model CommunityMember {
+  id          String    @id @default(cuid())
+  communityId String
+  userId      String
+  role        String    @default("MEMBER")
+  isActive    Boolean   @default(true)
+  discordMainMember Boolean?
+  discordRoleIdsJson String @default("[]")
+  discordSyncedAt DateTime?
+  joinedAt    DateTime  @default(now())
+  community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([communityId, userId])
+  @@index([userId, isActive])
+}
+
+model Department {
+  id            String   @id @default(cuid())
+  communityId   String?
+  name          String   // e.g. "Police Department", "EMS & Rescue", "Staff Operations"
+  code          String   // e.g. "LSPD", "SAFR", "STAFF"
+  discordGuildId String? // Associated department Discord server ID
+  discordRoleId  String? // Associated main Discord role ID
+  weeklyQuotaHours Float @default(4.0)
+  rankStructureJson String @default("[\"Member\",\"Supervisor\",\"High Command\"]")
+  discordRoleMappingsJson String @default("{}")
+
+  community     Community? @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  users         User[]
+  members       DepartmentMember[]
+  subdivisions  Subdivision[]
+  sops          StandardOperatingProcedure[]
+  applications  Application[]
+  applicationForms ApplicationForm[]
+  dutyShifts    DutyShift[]
+  leaveRequests LeaveOfAbsence[]
+  trainingCourses TrainingCourse[]
+  inactivityStrikes InactivityStrike[]
+  disciplinaryRecords DisciplinaryRecord[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([communityId, code])
+  @@index([communityId])
+}
+
+model DepartmentMember {
+  id           String     @id @default(cuid())
+  departmentId String
+  userId       String
+  rank         String     @default("Member")
+  badgeNumber  String?
+  callsign     String?
+  status       String     @default("ACTIVE")
+  inactivityExempt Boolean @default(false)
+  exemptionReason String?
+  joinedAt     DateTime   @default(now())
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([departmentId, userId])
+  @@index([departmentId, status])
+}
+
+model Subdivision {
+  id            String   @id @default(cuid())
+  departmentId  String
+  name          String   // e.g. "Air Support", "SWAT", "Traffic Operations", "K9"
+  code          String   // e.g. "ASU", "SWAT", "TEU"
+  maxUnits      Int      @default(10)
+  weeklyQuotaHours Float @default(2.0)
+  callsignPrefix String?
+  callsignPattern String?
+
+  department    Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  members       SubdivisionMember[]
+  sops          StandardOperatingProcedure[]
+  dutyShifts    DutyShift[]
+  trainingCourses TrainingCourse[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model SubdivisionMember {
+  id            String   @id @default(cuid())
+  userId        String
+  subdivisionId String
+  role          String   @default("OPERATOR") // "LEAD" | "SUPERVISOR" | "OPERATOR"
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subdivision   Subdivision @relation(fields: [subdivisionId], references: [id], onDelete: Cascade)
+
+  joinedAt      DateTime @default(now())
+
+  @@unique([userId, subdivisionId])
+}
+
+model ConnectedServer {
+  id          String    @id @default(cuid())
+  communityId String
+  departmentId String?
+  subdivisionId String?
+  guildId     String
+  name        String
+  kind        String    @default("DEPARTMENT")
+  botEnabled  Boolean   @default(false)
+  supervisorRoleIdsJson String @default("[]")
+  notificationChannelId String?
+  notifyLeave Boolean @default(false)
+  notifyApplications Boolean @default(false)
+  notifyInactivity Boolean @default(false)
+  lastBotSeenAt DateTime?
+  community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([communityId, guildId])
+  @@index([communityId])
+  @@index([guildId])
+}
+
+model DiscordLinkCode {
+  id        String   @id @default(cuid())
+  discordId String   @unique
+  codeHash  String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
+model DiscordApiNonce {
+  id        String   @id @default(cuid())
+  nonce     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
+model DiscordRateLimit {
+  id        String   @id @default(cuid())
+  guildId   String
+  discordId String
+  bucket    Int
+  count     Int      @default(0)
+
+  @@unique([guildId, discordId, bucket])
+  @@index([bucket])
+}
+
+model DiscordInteraction {
+  id             String   @id @default(cuid())
+  interactionId  String   @unique
+  requestHash    String
+  responseJson   String
+  createdAt      DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model DiscordOutboxEvent {
+  id          String   @id @default(cuid())
+  eventKey    String   @unique
+  communityId String
+  guildId     String
+  channelId   String
+  content     String
+  attempts    Int      @default(0)
+  deliveredAt DateTime?
+  deadLetteredAt DateTime?
+  leaseToken  String?
+  leaseUntil  DateTime?
+  availableAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+
+  @@index([guildId, deliveredAt, availableAt])
+}
+
+model DutyShift {
+  id            String   @id @default(cuid())
+  sourceEventId String?  @unique
+  activeUserId  String?  @unique
+  userId        String
+  departmentId  String?
+  subdivisionId String?
+  startTime     DateTime @default(now())
+  endTime       DateTime?
+  durationMinutes Int?
+  callsign      String
+  source        String   @default("WEB") // "WEB" | "DISCORD_BOT" | "DISCORD_VOICE" | "WEB_CAD"
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department    Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  subdivision   Subdivision? @relation(fields: [subdivisionId], references: [id], onDelete: SetNull)
+
+  createdAt     DateTime @default(now())
+
+  @@index([userId, endTime])
+  @@index([departmentId, startTime])
+}
+
+model LeaveOfAbsence {
+  id            String   @id @default(cuid())
+  userId        String
+  departmentId  String?
+  startDate     DateTime
+  endDate       DateTime
+  reason        String
+  status        String   @default("PENDING") // "PENDING" | "APPROVED" | "DENIED" | "EXPIRED"
+  reviewedBy    String?
+  reviewNotes   String?
+  discordRoleGiven Boolean @default(false)
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department    Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([userId, status, startDate, endDate])
+}
+
+model InactivityStrike {
+  id            String   @id @default(cuid())
+  officerId     String
+  departmentId  String?
+  commanderId   String?
+  weekStartDate DateTime
+  hoursLogged   Float
+  hoursRequired Float
+  strikeLevel   Int      @default(1) // 1 = Warning, 2 = Formal Strike, 3 = Demotion/Suspension
+  status        String   @default("DRAFT") // "DRAFT" | "CONFIRMED" | "PARDONED"
+  commandNotes  String?
+  discordNotified Boolean @default(false)
+  expiresAt     DateTime?
+  pardonedAt    DateTime?
+
+  officer       User     @relation("OfficerStrikes", fields: [officerId], references: [id], onDelete: Cascade)
+  commander     User?    @relation("CommanderStrikes", fields: [commanderId], references: [id])
+  department    Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([officerId, status, expiresAt])
+}
+
+model DisciplinaryRecord {
+  id           String   @id @default(cuid())
+  departmentId String
+  subjectId    String
+  issuerId     String
+  type         String   @default("WARNING")
+  title        String
+  details      String
+  status       String   @default("ACTIVE")
+  expiresAt    DateTime?
+  pardonedAt   DateTime?
+  pardonNotes  String?
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  subject      User @relation("DisciplinarySubject", fields: [subjectId], references: [id], onDelete: Cascade)
+  issuer       User @relation("DisciplinaryIssuer", fields: [issuerId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([departmentId, subjectId, status])
+  @@index([expiresAt])
+}
+
+model StandardOperatingProcedure {
+  id            String   @id @default(cuid())
+  departmentId  String
+  subdivisionId String?
+  title         String
+  category      String   // e.g. "Use of Force", "Radio Protocol", "Vehicle Operations"
+  content       String
+  version       String   @default("1.0")
+  requireSignOff Boolean @default(true)
+
+  department    Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  subdivision   Subdivision? @relation(fields: [subdivisionId], references: [id])
+  versions      SOPVersion[]
+  acknowledgements SOPAcknowledgement[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model SOPVersion {
+  id          String   @id @default(cuid())
+  sopId       String
+  version     String
+  content     String
+  changeNotes String?
+  editorId    String
+  sop         StandardOperatingProcedure @relation(fields: [sopId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+
+  @@unique([sopId, version])
+  @@index([sopId, createdAt])
+}
+
+model SOPAcknowledgement {
+  id          String   @id @default(cuid())
+  sopId       String
+  version     String
+  userId      String
+  acknowledgedAt DateTime @default(now())
+  sop         StandardOperatingProcedure @relation(fields: [sopId], references: [id], onDelete: Cascade)
+  user        User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([sopId, version, userId])
+  @@index([userId])
+}
+
+model Application {
+  id            String   @id @default(cuid())
+  departmentId  String
+  applicantUserId String?
+  applicantDiscordId String
+  applicantName String
+  answersJson   String   // JSON payload of form responses
+  score         Float?
+  status        String   @default("SUBMITTED") // "SUBMITTED" | "UNDER_REVIEW" | "INTERVIEW" | "ACCEPTED" | "DENIED"
+  reviewerNotes String?
+  stage         String   @default("SUBMITTED")
+  reviewerId    String?
+
+  department    Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  applicant     User? @relation("ApplicationApplicant", fields: [applicantUserId], references: [id], onDelete: SetNull)
+  reviews       ApplicationReview[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([departmentId, status, createdAt])
+  @@index([applicantUserId, createdAt])
+}
+
+model ApplicationForm {
+  id            String   @id @default(cuid())
+  communityId   String
+  departmentId  String
+  title         String
+  description   String?
+  questionsJson String   @default("[]")
+  stagesJson    String   @default("[\"SUBMITTED\",\"UNDER_REVIEW\",\"INTERVIEW\",\"ACCEPTED\",\"DENIED\"]")
+  autoScore     Boolean  @default(false)
+  isOpen        Boolean  @default(true)
+  community     Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([communityId, isOpen])
+}
+
+model ApplicationReview {
+  id            String   @id @default(cuid())
+  applicationId String
+  reviewerId    String
+  stage         String
+  decision      String
+  notes         String?
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  reviewer      User @relation(fields: [reviewerId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+
+  @@index([applicationId, createdAt])
+}
+
+model InvestigationCase {
+  id               String   @id @default(cuid())
+  communityId      String
+  caseNumber       String
+  title            String
+  allegations      String
+  status           String   @default("OPEN")
+  finding          String?
+  outcome          String?
+  subjectUserId    String?
+  investigatorUserId String?
+  community        Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  subject          User? @relation("InvestigationSubject", fields: [subjectUserId], references: [id], onDelete: SetNull)
+  investigator     User? @relation("InvestigationInvestigator", fields: [investigatorUserId], references: [id], onDelete: SetNull)
+  entries          InvestigationEntry[]
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([communityId, caseNumber])
+  @@index([communityId, status, createdAt])
+}
+
+model InvestigationEntry {
+  id          String   @id @default(cuid())
+  caseId      String
+  createdById String
+  type        String   @default("NOTE")
+  content     String
+  referenceUrl String?
+  case        InvestigationCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  createdBy   User @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+
+  @@index([caseId, createdAt])
+}
+
+model TrainingCourse {
+  id             String   @id @default(cuid())
+  communityId    String
+  departmentId   String?
+  subdivisionId  String?
+  title          String
+  description    String?
+  certification  String?
+  required       Boolean  @default(false)
+  community      Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  department     Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  subdivision    Subdivision? @relation(fields: [subdivisionId], references: [id], onDelete: SetNull)
+  records        TrainingRecord[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([communityId, departmentId])
+}
+
+model TrainingRecord {
+  id             String   @id @default(cuid())
+  courseId       String
+  userId         String
+  certifiedById  String
+  status         String   @default("COMPLETED")
+  completedAt    DateTime @default(now())
+  expiresAt      DateTime?
+  notes          String?
+  course         TrainingCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user           User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([courseId, userId, completedAt])
+}
+
+model InactivityPolicy {
+  id                    String   @id @default(cuid())
+  communityId           String   @unique
+  weeklyQuotaHours      Float    @default(4)
+  warningThreshold      Int      @default(1)
+  strikeThreshold       Int      @default(2)
+  gracePeriodDays       Int      @default(7)
+  strikeExpiryDays      Int      @default(90)
+  autoApplyWarnings     Boolean  @default(false)
+  community             Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  updatedAt             DateTime @updatedAt
+}
+
+model AuditLog {
+  id            String   @id @default(cuid())
+  communityId   String?
+  actorId       String   // Discord ID or User ID
+  actorName     String
+  action        String   // e.g. "LOA_APPROVED", "STRIKE_CONFIRMED", "ROLE_PROMOTED"
+  targetId      String?
+  details       String
+  ipAddress     String?
+
+  community     Community? @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+
+  @@index([communityId, createdAt])
+}
+
+model Notification {
+  id          String   @id @default(cuid())
+  communityId String
+  userId      String
+  title       String
+  message     String
+  readAt      DateTime?
+  community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user        User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+
+  @@index([userId, readAt, createdAt])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}

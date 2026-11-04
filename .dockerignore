@@ -1,0 +1,14 @@
+.git
+.next
+node_modules
+coverage
+out
+build
+data
+*.log
+.env*
+**/.env*
+prisma/*.db
+prisma/*.db-*
+prisma/schema.postgresql.prisma
+bot/.env*

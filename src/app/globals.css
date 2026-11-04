@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-heading: var(--font-heading);
+    --font-sans: var(--font-sans);
+  }
+
+  body {
+    font-family: var(--font-sans), system-ui, sans-serif;
+    color: #e2e8f0;
+    background-color: #020617;
+    line-height: 1.65;
+  }
+
+  h1, h2, h3, h4, h5, h6, .font-heading {
+    font-family: var(--font-heading), system-ui, sans-serif;
+    letter-spacing: -0.025em;
+    line-height: 1.15;
+    color: #f8fafc;
+  }
+
+  p {
+    line-height: 1.65;
+  }
+}
+
+/* Subtle clean scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #020617;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
